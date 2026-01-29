@@ -1,0 +1,210 @@
+Here are the instructions for Cursor to rebuild the Salesforce OAuth function in Railway:
+
+Instructions for Building Salesforce OAuth Integration on Railway
+Project Overview
+Build a Node.js/Express application that handles Salesforce OAuth 2.0 authentication with PKCE (Proof Key for Code Exchange). This will be deployed on Railway and serves as the foundation for a larger Salesforce integration system.
+Technical Requirements
+Stack
+
+Runtime: Node.js (v18 or later)
+Framework: Express.js
+Database: PostgreSQL (for storing OAuth tokens)
+Deployment: Railway
+Authentication Flow: OAuth 2.0 Authorization Code Flow with PKCE
+
+Dependencies to Install
+json{
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.3",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^3.3.2"
+  }
+}
+Salesforce OAuth Configuration
+Connected App Details
+
+Consumer Key: [YOUR_SALESFORCE_CONSUMER_KEY]
+Consumer Secret: [YOUR_SALESFORCE_CONSUMER_SECRET]
+Salesforce Login URL: https://login.salesforce.com
+OAuth Scopes: api refresh_token
+Callback URL Pattern: https://[YOUR-RAILWAY-DOMAIN]/callback
+
+Environment Variables
+Create a .env file with:
+envPORT=3000
+DATABASE_URL=postgresql://user:password@host:port/database
+SF_CLIENT_ID=[YOUR_SALESFORCE_CONSUMER_KEY]
+SF_CLIENT_SECRET=[YOUR_SALESFORCE_CONSUMER_SECRET]
+SF_LOGIN_URL=https://login.salesforce.com
+NODE_ENV=development
+Database Schema
+Create a PostgreSQL table to store OAuth tokens:
+sqlCREATE TABLE salesforce_tokens (
+  id SERIAL PRIMARY KEY,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  instance_url TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- For now, we'll store a single set of tokens
+-- Later this can be expanded to support multiple Salesforce orgs
+Required Routes
+1. GET / - Home/Dashboard
+
+Check if tokens exist in database
+If connected: Show dashboard with buttons for:
+
+"Test Connection" - queries Salesforce Accounts
+"Query Actabl Leads" - queries Actabl_Lead__c custom object
+"Get Schema" - retrieves Actabl_Lead__c object schema
+"Disconnect" - clears stored tokens
+
+
+If not connected: Show "Connect to Salesforce" button
+Return HTML page (inline HTML is fine for now)
+
+2. GET /auth - Initiate OAuth Flow
+
+Generate PKCE code verifier and challenge using crypto
+
+Code verifier: 32 random bytes, base64url encoded
+Code challenge: SHA-256 hash of verifier, base64url encoded
+
+
+Store code verifier in memory or session (use Map for now)
+Generate state parameter (timestamp + random string)
+Redirect to Salesforce authorization URL with parameters:
+
+response_type=code
+client_id=[SF_CLIENT_ID]
+redirect_uri=[YOUR_DOMAIN]/callback
+scope=api refresh_token
+code_challenge=[generated_challenge]
+code_challenge_method=S256
+state=[generated_state]
+
+
+
+3. GET /callback - OAuth Callback Handler
+
+Receive code and state parameters from Salesforce
+Retrieve stored code verifier using state
+Exchange authorization code for tokens by POSTing to https://login.salesforce.com/services/oauth2/token with:
+
+grant_type=authorization_code
+client_id, client_secret
+redirect_uri
+code
+code_verifier
+
+
+Store tokens in PostgreSQL database
+Show success page with link back to dashboard
+
+4. GET /test - Test Connection
+
+Retrieve tokens from database
+Query Salesforce: SELECT Id, Name FROM Account LIMIT 5
+If 401 error, refresh token automatically
+Return JSON with results
+
+5. GET /leads - Query Custom Object
+
+Retrieve tokens from database
+Query: SELECT Id, Name, CreatedDate FROM Actabl_Lead__c ORDER BY CreatedDate DESC LIMIT 10
+Handle token refresh on 401
+Return JSON with results
+
+6. GET /schema - Get Object Schema
+
+Retrieve tokens from database
+Call Salesforce describe API: /services/data/v59.0/sobjects/Actabl_Lead__c/describe
+Extract and format field information
+Return JSON with field names, labels, types, and requirements
+
+7. POST /disconnect - Clear Tokens
+
+Delete tokens from database
+Return success response
+
+Helper Functions to Implement
+PKCE Generation
+javascript// Generate code verifier (32 random bytes, base64url encoded)
+// Generate code challenge (SHA-256 hash of verifier, base64url encoded)
+// Use Node's crypto module
+Token Refresh
+javascript// POST to https://login.salesforce.com/services/oauth2/token
+// Parameters: grant_type=refresh_token, client_id, client_secret, refresh_token
+// Update stored tokens in database
+// Return new access token
+Salesforce API Call Wrapper
+javascript// Generic function to make Salesforce API calls
+// Automatically handle 401 errors by refreshing token
+// Parameters: endpoint, method (GET/POST/PATCH/DELETE), body (optional)
+```
+
+## Important Implementation Notes
+
+1. **PKCE Storage**: Use an in-memory Map to store code verifiers temporarily (with state as key). Add TTL cleanup for expired entries (30 minutes).
+
+2. **Error Handling**: Gracefully handle:
+   - Missing tokens
+   - Expired tokens (auto-refresh)
+   - Failed API calls
+   - Database errors
+
+3. **Security**: 
+   - Never expose client secret in client-side code
+   - Use HTTPS in production (Railway provides this)
+   - Clear sensitive data from logs
+
+4. **Base64 URL Encoding**: Implement proper base64url encoding (standard base64 but replace `+` with `-`, `/` with `_`, and remove `=` padding)
+
+## Railway Deployment Steps
+
+1. Create `Procfile`:
+```
+web: node server.js
+
+Add start script to package.json:
+
+json{
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  }
+}
+```
+
+3. Set environment variables in Railway dashboard
+4. Add PostgreSQL database in Railway
+5. Update Salesforce Connected App callback URL to Railway domain
+
+## File Structure
+```
+project-root/
+├── server.js           # Main Express application
+├── db.js              # PostgreSQL connection and queries
+├── utils/
+│   ├── pkce.js        # PKCE generation functions
+│   └── salesforce.js  # Salesforce API helper functions
+├── .env               # Environment variables (local only)
+├── package.json
+└── README.md
+Success Criteria
+
+User can click "Connect to Salesforce" and authorize
+OAuth flow completes successfully and stores tokens
+Test connection button successfully queries Salesforce Accounts
+Query Actabl Leads button retrieves custom object data
+Get Schema button shows object metadata
+Token refresh happens automatically when access token expires
+Application runs successfully on Railway
+
+Reference Implementation
+The working Cloudflare Worker version uses the exact same OAuth flow and API calls. Port the logic to Express with PostgreSQL for persistent token storage instead of KV storage.
+
+These instructions provide everything needed to rebuild the Salesforce OAuth integration in a Railway-hosted Node.js environment.
